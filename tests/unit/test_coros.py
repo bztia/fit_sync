@@ -37,10 +37,42 @@ class TestCorosPlatform:
         }
         platform = CorosPlatform(credentials, str(temp_cache_dir))
         
-        with patch('fit_sync.platforms.coros.logger') as mock_logger:
+        # Mock the response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "code": 200,
+            "data": {
+                "token": "mock_token_123",
+                "userId": "user_123",
+                "email": "test@example.com"
+            }
+        }
+        
+        # Mock the token caching functions to avoid file operations
+        with patch('fit_sync.platforms.coros.logger') as mock_logger, \
+             patch('requests.Session.post', return_value=mock_response), \
+             patch.object(platform, '_save_token_to_cache') as mock_save, \
+             patch.object(platform, '_load_cached_token', return_value=False):
+            
+            # First call should authenticate via API
             result = platform.authenticate()
-            mock_logger.info.assert_called_once()
+            
+            mock_logger.info.assert_called()
             assert result is True
+            assert platform.token == "mock_token_123"
+            assert platform.user_id == "user_123"
+            mock_save.assert_called_once()
+            
+        # Now test with cached token
+        platform2 = CorosPlatform(credentials, str(temp_cache_dir))
+        with patch('fit_sync.platforms.coros.logger') as mock_logger, \
+             patch.object(platform2, '_load_cached_token', return_value=True) as mock_load:
+            # Second call should use cached token
+            result = platform2.authenticate()
+            assert result is True
+            mock_load.assert_called_once()
+            mock_logger.info.assert_called()
 
     def test_list_activities_no_filter(self, temp_cache_dir):
         """Test listing activities without filters."""
@@ -130,6 +162,53 @@ class TestCorosCNPlatform:
         assert platform.cache_dir == temp_cache_dir
         assert platform.base_url == "https://teamapi.coros.com"
         assert platform.web_url == "https://t.coros.com"
+        assert platform.token_cache_file == platform.cache_dir / "coros_cn_token.json"
+        
+    def test_authenticate(self, temp_cache_dir):
+        """Test CN platform authenticate method."""
+        credentials = {
+            "email": "test@example.com",
+            "password": "test_password"
+        }
+        platform = CorosCNPlatform(credentials, str(temp_cache_dir))
+        
+        # Mock the response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "result": "0000",
+            "message": "OK",
+            "data": {
+                "accessToken": "mock_cn_token_123",
+                "userId": "user_cn_123",
+                "email": "test@example.com"
+            }
+        }
+        
+        # Mock the token caching functions to avoid file operations
+        with patch('fit_sync.platforms.coros.logger') as mock_logger, \
+             patch('requests.Session.post', return_value=mock_response), \
+             patch.object(platform, '_save_token_to_cache') as mock_save, \
+             patch.object(platform, '_load_cached_token', return_value=False):
+            
+            # First call should authenticate via API
+            result = platform.authenticate()
+            
+            mock_logger.info.assert_called()
+            assert result is True
+            assert platform.token == "mock_cn_token_123"
+            assert platform.user_id == "user_cn_123"
+            mock_save.assert_called_once()
+            
+        # Now test with cached token
+        platform2 = CorosCNPlatform(credentials, str(temp_cache_dir))
+        with patch('fit_sync.platforms.coros.logger') as mock_logger, \
+             patch.object(platform2, '_load_cached_token', return_value=True) as mock_load:
+            # Second call should use cached token
+            result = platform2.authenticate()
+            assert result is True
+            mock_load.assert_called_once()
+            mock_logger.info.assert_called()
         
     def test_coros_different_activity_types(self, temp_cache_dir):
         """Test that Coros uses different activity types than Garmin."""

@@ -10,7 +10,8 @@ import hashlib
 import requests
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +28,83 @@ class CorosPlatform:
         """
         self.email = credentials.get('email')
         self.password = credentials.get('password')
-        self.cache_dir = Path(os.path.expanduser(cache_dir))
+        self.cache_dir = Path(cache_dir)
         self.session = requests.Session()
         self.token = None
+        self.user_id = None
+        self.base_url = "https://api.coros.com"
+        self.web_url = "https://www.coros.com"
+        self.token_cache_file = self.cache_dir / "coros_token.json"
         
         # Create cache directory if it doesn't exist
-        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         
+    def _load_cached_token(self) -> bool:
+        """
+        Load token from the cache file if it exists and is not expired.
+        
+        Returns:
+            True if a valid token was loaded, False otherwise
+        """
+        if not self.token_cache_file.exists():
+            return False
+        
+        try:
+            with open(self.token_cache_file, 'r') as f:
+                cache_data = json.load(f)
+                
+            # Check if token is for current user
+            if cache_data.get('email') != self.email:
+                return False
+                
+            # Check if token is expired
+            expiry_time = datetime.fromisoformat(cache_data.get('expiry_time', '2000-01-01T00:00:00'))
+            if datetime.now() > expiry_time:
+                logger.debug("Cached token has expired")
+                return False
+                
+            # Load token and user_id
+            self.token = cache_data.get('token')
+            self.user_id = cache_data.get('user_id')
+            
+            if self.token:
+                # Update session headers with token
+                self.session.headers.update({
+                    'Authorization': f"Bearer {self.token}"
+                })
+                logger.info(f"Using cached token for {self.email}")
+                return True
+                
+        except Exception as e:
+            logger.debug(f"Error loading cached token: {str(e)}")
+            
+        return False
+        
+    def _save_token_to_cache(self, token_data: Dict[str, Any]):
+        """
+        Save token and user info to cache file.
+        
+        Args:
+            token_data: Dictionary containing token and user info
+        """
+        try:
+            # Set token expiry to 12 hours from now (conservative estimate)
+            cache_data = {
+                'email': self.email,
+                'token': self.token,
+                'user_id': self.user_id,
+                'expiry_time': (datetime.now() + timedelta(hours=12)).isoformat(),
+                'platform': self.__class__.__name__
+            }
+            
+            with open(self.token_cache_file, 'w') as f:
+                json.dump(cache_data, f)
+                
+            logger.debug(f"Saved token to cache for {self.email}")
+            
+        except Exception as e:
+            logger.debug(f"Error saving token to cache: {str(e)}")
+    
     def authenticate(self) -> bool:
         """
         Authenticate with the Coros platform.
@@ -42,8 +113,75 @@ class CorosPlatform:
             True if authentication was successful, False otherwise
         """
         logger.info(f"Authenticating with Coros as {self.email}")
-        # Stub implementation always returns True
-        return True
+        
+        # Try to load token from cache first
+        if self._load_cached_token():
+            return True
+            
+        if not self.email or not self.password:
+            logger.error("Email or password missing")
+            return False
+        
+        # Prepare headers
+        headers = {
+            'accept': 'application/json, text/plain, */*',
+            'content-type': 'application/json',
+            'origin': self.web_url,
+            'referer': self.web_url + '/',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
+        }
+        
+        # Prepare login data
+        login_data = {
+            "account": self.email,
+            "accountType": 2,  # Email login type
+            "pwd": hashlib.md5(self.password.encode()).hexdigest()
+        }
+        
+        try:
+            # Make login request
+            login_url = f"{self.base_url}/account/login"
+            logger.debug(f"Sending login request to {login_url}")
+            response = self.session.post(
+                login_url,
+                headers=headers,
+                json=login_data
+            )
+            
+            # Check response
+            if response.status_code == 200:
+                response_data = response.json()
+                
+                if response_data.get('code') == 200:
+                    # Extract and store auth token
+                    self.token = response_data.get('data', {}).get('token')
+                    if self.token:
+                        logger.info("Coros authentication successful")
+                        
+                        # Update session headers with token for subsequent requests
+                        self.session.headers.update({
+                            'Authorization': f"Bearer {self.token}"
+                        })
+                        
+                        # Get user ID if available
+                        self.user_id = response_data.get('data', {}).get('userId')
+                        
+                        # Save token to cache
+                        self._save_token_to_cache(response_data.get('data', {}))
+                        
+                        return True
+                    else:
+                        logger.error("Authentication successful but no token received")
+                else:
+                    error_msg = response_data.get('msg', 'Unknown error')
+                    logger.error(f"Authentication failed: {error_msg}")
+            else:
+                logger.error(f"Authentication failed with status code: {response.status_code}")
+                
+        except Exception as e:
+            logger.error(f"Authentication error: {str(e)}")
+            
+        return False
         
     def list_activities(self, 
                         limit: int = 10, 
@@ -131,6 +269,7 @@ class CorosCNPlatform(CorosPlatform):
         super().__init__(credentials, cache_dir)
         self.base_url = "https://teamapi.coros.com"
         self.web_url = "https://t.coros.com"
+        self.token_cache_file = self.cache_dir / "coros_cn_token.json"
     
     def _hash_password(self, password: str) -> str:
         """
@@ -152,6 +291,10 @@ class CorosCNPlatform(CorosPlatform):
             True if authentication was successful, False otherwise
         """
         logger.info(f"Authenticating with Coros CN as {self.email}")
+        
+        # Try to load token from cache first
+        if self._load_cached_token():
+            return True
         
         if not self.email or not self.password:
             logger.error("Email or password missing")
@@ -203,6 +346,10 @@ class CorosCNPlatform(CorosPlatform):
                         
                         # Store the user ID for later use
                         self.user_id = response_data.get('data', {}).get('userId')
+                        
+                        # Save token to cache
+                        self._save_token_to_cache(response_data.get('data', {}))
+                        
                         return True
                     else:
                         logger.error("Authentication successful but no access token received")
