@@ -209,6 +209,127 @@ class TestCorosCNPlatform:
             assert result is True
             mock_load.assert_called_once()
             mock_logger.info.assert_called()
+    
+    def test_list_activities_cn(self, temp_cache_dir):
+        """Test list_activities method for Coros CN platform."""
+        credentials = {
+            "email": "test@example.com",
+            "password": "test_password"
+        }
+        platform = CorosCNPlatform(credentials, str(temp_cache_dir))
+        platform.token = "mock_token_123"  # Set token directly to avoid authentication
+        
+        # Mock API response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "apiCode": "C33BB719",
+            "result": "0000",
+            "message": "OK",
+            "data": {
+                "count": 1854,
+                "dataList": [
+                    {
+                        "adjustedPace": 0,
+                        "ascent": 3701,
+                        "avgCadence": 90,
+                        "avgHr": 104,
+                        "avgPower": 139,
+                        "avgSpeed": 816.81,
+                        "calorie": 5818000,
+                        "date": 20250323,
+                        "descent": 3616,
+                        "distance": 69282.4296875,
+                        "endTime": 1742737890,
+                        "labelId": "467870248094171141",
+                        "mode": 15,
+                        "sportType": 102,
+                        "startTime": 1742680814,
+                        "step": 98934,
+                        "workoutTime": 56590
+                    },
+                    {
+                        "adjustedPace": 0,
+                        "ascent": 0,
+                        "avgCadence": 166,
+                        "avgHr": 109,
+                        "avgPower": 325,
+                        "avgSpeed": 357.23,
+                        "calorie": 212000,
+                        "date": 20250321,
+                        "descent": 0,
+                        "distance": 5050.0,
+                        "endTime": 1742533550,
+                        "labelId": "467870244870848516",
+                        "mode": 8,
+                        "sportType": 101,
+                        "startTime": 1742531746,
+                        "step": 5008,
+                        "workoutTime": 1804
+                    }
+                ],
+                "pageNumber": 1,
+                "totalPage": 93
+            }
+        }
+        
+        # Mock get request
+        with patch('fit_sync.platforms.coros.logger'), \
+             patch('requests.Session.get', return_value=mock_response):
+            
+            # Test the list_activities method
+            activities = platform.list_activities(limit=10)
+            
+            # Verify the results
+            assert len(activities) == 2
+            
+            # Verify first activity
+            assert activities[0]["id"] == "COROS_CN_467870248094171141"
+            assert "trail_running" in activities[0]["activityType"]  # Sport type 102 should map to trail_running
+            assert "69.28" in activities[0]["distance"]  # Distance should be in km
+            assert activities[0]["avgHR"] == 104
+            assert activities[0]["elevationGain"] == "3701 m"
+            
+            # Verify second activity
+            assert activities[1]["id"] == "COROS_CN_467870244870848516"
+            assert "treadmill" in activities[1]["activityType"]  # Sport type 101 should map to treadmill
+            assert "5.05" in activities[1]["distance"]
+    
+    def test_download_activity_cn(self, temp_cache_dir):
+        """Test downloading a FIT file from Coros CN platform."""
+        credentials = {
+            "email": "test@example.com",
+            "password": "test_password"
+        }
+        platform = CorosCNPlatform(credentials, str(temp_cache_dir))
+        platform.token = "mock_token_123"  # Set token directly to avoid authentication
+        
+        # Create mock binary content for FIT file
+        mock_fit_content = b'\x0E\x10\x1C\xE82FIT\x00\x00\x00\x00\x00\x00\x00'
+        
+        # Mock API response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_content.return_value = [mock_fit_content]
+        
+        activity_id = "COROS_CN_467870248094171141"
+        
+        # Mock get request with context manager to ensure any file is cleaned up
+        with patch('fit_sync.platforms.coros.logger'), \
+             patch('requests.Session.get', return_value=mock_response):
+            
+            # Test the download_activity method
+            fit_file = platform.download_activity(activity_id)
+            
+            # Verify the result
+            assert fit_file is not None
+            assert fit_file.exists()
+            assert fit_file.name == f"{activity_id}.fit"
+            
+            # Verify file content (binary)
+            with open(fit_file, 'rb') as f:
+                content = f.read()
+                assert content == mock_fit_content
         
     def test_coros_different_activity_types(self, temp_cache_dir):
         """Test that Coros uses different activity types than Garmin."""
@@ -217,14 +338,48 @@ class TestCorosCNPlatform:
             "password": "test_password"
         }
         platform = CorosCNPlatform(credentials, str(temp_cache_dir))
+        platform.token = "mock_token_123"  # Set token directly to avoid authentication
         
-        activities = platform.list_activities(limit=10)
+        # Mock API response with specific activity types
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "result": "0000",
+            "message": "OK",
+            "data": {
+                "count": 10,
+                "dataList": [
+                    {
+                        "sportType": 102,  # trail_running
+                        "startTime": 1742680814,
+                        "distance": 10000.0,
+                        "labelId": "123456789",
+                        "workoutTime": 3600
+                    },
+                    {
+                        "sportType": 111,  # mountaineering
+                        "startTime": 1742531746,
+                        "distance": 5000.0,
+                        "labelId": "987654321",
+                        "workoutTime": 1800
+                    }
+                ],
+                "pageNumber": 1,
+                "totalPage": 1
+            }
+        }
         
-        # Check that Coros-specific activity types are used
-        found_types = set()
-        for activity in activities:
-            found_types.add(activity["activityType"])
-        
-        # Should find at least one Coros-specific activity type
-        coros_types = ["trail_running", "mountaineering"]
-        assert any(t in found_types for t in coros_types) 
+        # Mock get request
+        with patch('fit_sync.platforms.coros.logger'), \
+             patch('requests.Session.get', return_value=mock_response):
+             
+            activities = platform.list_activities(limit=10)
+            
+            # Check that Coros-specific activity types are used
+            found_types = set()
+            for activity in activities:
+                found_types.add(activity["activityType"])
+            
+            # Should find at least one Coros-specific activity type
+            coros_types = ["trail_running", "mountaineering"]
+            assert any(t in found_types for t in coros_types) 

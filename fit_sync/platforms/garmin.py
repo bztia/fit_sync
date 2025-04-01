@@ -87,7 +87,7 @@ class GarminPlatform:
                 "id": str(uuid.uuid4()),
                 "startTime": activity_date_str,
                 "activityType": activity_types[i % len(activity_types)],
-                "duration": f"{30 + i * 2}:{i:02d}",  # Format as MM:SS
+                "duration": f"00:{30 + i * 2:02d}:{i:02d}",  # Format as HH:MM:SS
                 "distance": f"{5.0 + i * 0.5:.1f} km",
                 "elevationGain": f"{i * 10} m",
                 "avgHR": 140 + i,
