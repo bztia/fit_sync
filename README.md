@@ -113,6 +113,12 @@ python -m fit_sync sync --source garmin_us --destination garmin_cn --start-date 
 
 # Clear cached data
 python -m fit_sync clear-cache
+
+# Clear only authentication cache
+python -m fit_sync clear-cache --auth-only
+
+# Clear only activities cache
+python -m fit_sync clear-cache --activities-only
 ```
 
 ### Command Options
@@ -137,6 +143,8 @@ python -m fit_sync clear-cache
 - `--start-date DATE`: Only consider activities after date (YYYY-MM-DD)
 - `--end-date DATE`: Only consider activities before date (YYYY-MM-DD)
 - `--limit N`: Maximum number of activities to consider
+
+> **Note**: When using the `download` command with `--index`, the application caches the activity list for 30 minutes to improve performance. If you need to refresh the list, use `clear-cache --activities-only` before running the command again.
 
 #### Sync Command
 - `--source`: Override source account from config

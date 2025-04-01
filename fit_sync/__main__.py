@@ -62,6 +62,7 @@ def main():
     # Clear cache command
     clear_cache_parser = subparsers.add_parser('clear-cache', help='Clear cached data')
     clear_cache_parser.add_argument('--auth-only', action='store_true', help='Only clear authentication cache')
+    clear_cache_parser.add_argument('--activities-only', action='store_true', help='Only clear activities cache')
     
     # Common options
     for subparser in [auth_parser, list_parser, download_parser, sync_parser, clear_cache_parser]:
@@ -169,13 +170,9 @@ def main():
                 logger.error(f"Failed to download activity {args.id}")
                 sys.exit(1)
         
-        # Otherwise, authenticate and list activities for download by index
-        platform = sync_manager.platforms[account]
-        if not platform.authenticate():
-            logger.error(f"Authentication failed for {account}")
-            sys.exit(1)
-            
-        activities = platform.list_activities(
+        # Get activities using the cached version if available
+        activities = sync_manager.get_activities(
+            account,
             limit=args.limit,
             activity_type=args.activity_type,
             start_date=args.start_date,
@@ -269,11 +266,17 @@ def main():
                 logger.info(f"Cleared authentication cache at {auth_cache}")
             else:
                 logger.info(f"No authentication cache found at {auth_cache}")
+        elif args.activities_only:
+            # Clear activities cache from memory
+            sync_manager.clear_activities_cache()
+            logger.info("Cleared activities cache from memory")
         else:
             if cache_dir.exists():
                 import shutil
                 shutil.rmtree(cache_dir)
                 cache_dir.mkdir(parents=True, exist_ok=True)
+                # Also clear activities cache from memory
+                sync_manager.clear_activities_cache()
                 logger.info(f"Cleared all cached data at {cache_dir}")
             else:
                 logger.info(f"No cache directory found at {cache_dir}")

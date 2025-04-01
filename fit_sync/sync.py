@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
+import datetime
 
 from .platforms.garmin import GarminUSPlatform, GarminCNPlatform
 from .platforms.coros import CorosCNPlatform
@@ -25,6 +26,8 @@ class SyncManager:
         self.config = config
         self.cache_dir = Path(config.get('cache', {}).get('directory', '~/.fit_sync/cache')).expanduser()
         self.platforms = {}
+        self._activities_cache = {}  # 活动列表缓存
+        self._activities_cache_timestamp = {}  # 缓存时间戳
         
         # Initialize platforms
         self._init_platforms()
@@ -246,3 +249,75 @@ class SyncManager:
                     logger.error(f"Failed to upload activity {activity_id} to {dest_id}")
                     
         return total_synced 
+
+    def get_activities(self, 
+                      platform_id: str,
+                      limit: int = 10,
+                      activity_type: Optional[str] = None,
+                      start_date: Optional[str] = None,
+                      end_date: Optional[str] = None,
+                      use_cache: bool = True,
+                      cache_max_age: int = 30) -> List[Dict]:
+        """
+        Get activities from a platform with caching support.
+        
+        Args:
+            platform_id: Platform ID to get activities from
+            limit: Maximum number of activities to return
+            activity_type: Filter by activity type
+            start_date: Only include activities on or after this date (YYYY-MM-DD)
+            end_date: Only include activities on or before this date (YYYY-MM-DD)
+            use_cache: Whether to use cached results if available
+            cache_max_age: Maximum age of cache in minutes (default: 30)
+            
+        Returns:
+            List of activity dictionaries
+        """
+        if platform_id not in self.platforms:
+            logger.error(f"Platform {platform_id} not configured")
+            return []
+            
+        # Create cache key based on query parameters
+        cache_key = f"{platform_id}:{limit}:{activity_type}:{start_date}:{end_date}"
+        
+        # Check if we have cached results that aren't expired
+        current_time = datetime.datetime.now()
+        if (use_cache and 
+            cache_key in self._activities_cache and 
+            cache_key in self._activities_cache_timestamp):
+            
+            cache_time = self._activities_cache_timestamp[cache_key]
+            age_minutes = (current_time - cache_time).total_seconds() / 60
+            
+            if age_minutes <= cache_max_age:
+                logger.debug(f"Using cached activities for {platform_id} (age: {age_minutes:.1f} minutes)")
+                return self._activities_cache[cache_key]
+            else:
+                logger.debug(f"Cache expired for {platform_id} (age: {age_minutes:.1f} minutes)")
+        
+        # Authenticate with platform
+        platform = self.platforms[platform_id]
+        if not platform.authenticate():
+            logger.error(f"Authentication failed for {platform_id}")
+            return []
+        
+        # Get activities from platform
+        activities = platform.list_activities(
+            limit=limit,
+            activity_type=activity_type,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        # Cache the results with timestamp
+        self._activities_cache[cache_key] = activities
+        self._activities_cache_timestamp[cache_key] = current_time
+        logger.debug(f"Cached {len(activities)} activities for {platform_id}")
+        
+        return activities
+        
+    def clear_activities_cache(self):
+        """Clear the activities cache."""
+        self._activities_cache = {}
+        self._activities_cache_timestamp = {}
+        logger.debug("Activities cache cleared") 
