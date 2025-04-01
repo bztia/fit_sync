@@ -1,0 +1,36 @@
+{
+  "accounts": {
+    "garmin_us": {
+      "email": "your.email@example.com",
+      "password": "your_password"
+    },
+    "garmin_cn": {
+      "email": "your.email@example.com",
+      "password": "your_password"
+    },
+    "coros_cn": {
+      "email": "your.email@example.com",
+      "password": "your_password"
+    }
+  },
+  "sync_rules": [
+    {
+      "source": "garmin_us",
+      "destination": "garmin_cn",
+      "activity_types": ["running", "cycling", "swimming", "hiking"],
+      "start_date": "2023-01-01",
+      "conflict_strategy": "skip_existing"
+    },
+    {
+      "source": "coros_cn",
+      "destination": "garmin_cn",
+      "activity_types": ["trail_running", "hiking", "mountaineering"],
+      "start_date": "2023-01-01",
+      "conflict_strategy": "replace_existing"
+    }
+  ],
+  "cache": {
+    "max_age_days": 7,
+    "directory": "~/.fit_sync/cache"
+  }
+} 
