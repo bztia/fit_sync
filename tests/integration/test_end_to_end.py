@@ -6,7 +6,7 @@ import os
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from fit_sync.sync import SyncManager
 from fit_sync.platforms.garmin import GarminUSPlatform, GarminCNPlatform
@@ -16,10 +16,14 @@ from fit_sync.platforms.coros import CorosCNPlatform
 class TestEndToEnd:
     """End-to-end tests for fit_sync."""
 
-    def test_full_sync_process(self, mock_config, temp_cache_dir):
+    @patch('fit_sync.platforms.coros.CorosCNPlatform.authenticate')
+    def test_full_sync_process(self, mock_coros_auth, mock_config, temp_cache_dir):
         """Test the complete synchronization process."""
         # Setup mock configuration
         mock_config["cache"]["directory"] = str(temp_cache_dir)
+        
+        # Mock Coros authentication to return True
+        mock_coros_auth.return_value = True
         
         # Initialize sync manager
         manager = SyncManager(mock_config)

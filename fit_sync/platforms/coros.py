@@ -6,6 +6,9 @@ import logging
 import os
 import datetime
 import uuid
+import hashlib
+import requests
+import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -25,7 +28,8 @@ class CorosPlatform:
         self.email = credentials.get('email')
         self.password = credentials.get('password')
         self.cache_dir = Path(os.path.expanduser(cache_dir))
-        self.session = None
+        self.session = requests.Session()
+        self.token = None
         
         # Create cache directory if it doesn't exist
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -125,4 +129,100 @@ class CorosCNPlatform(CorosPlatform):
     
     def __init__(self, credentials: Dict[str, str], cache_dir: str):
         super().__init__(credentials, cache_dir)
-        self.base_url = "https://api.coros.com" 
+        self.base_url = "https://teamapi.coros.com"
+        self.web_url = "https://t.coros.com"
+    
+    def _hash_password(self, password: str) -> str:
+        """
+        Hash the password with MD5 for COROS CN login.
+        
+        Args:
+            password: Plain text password
+            
+        Returns:
+            MD5 hashed password
+        """
+        return hashlib.md5(password.encode()).hexdigest()
+    
+    def authenticate(self) -> bool:
+        """
+        Authenticate with the COROS CN platform.
+        
+        Returns:
+            True if authentication was successful, False otherwise
+        """
+        logger.info(f"Authenticating with Coros CN as {self.email}")
+        
+        if not self.email or not self.password:
+            logger.error("Email or password missing")
+            return False
+        
+        # Prepare headers
+        headers = {
+            'accept': 'application/json, text/plain, */*',
+            'content-type': 'application/json',
+            'origin': self.web_url,
+            'referer': self.web_url + '/',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
+        }
+        
+        # Prepare login data
+        login_data = {
+            "account": self.email,
+            "accountType": 2,  # Email login type
+            "pwd": self._hash_password(self.password)
+        }
+        
+        try:
+            # Make login request
+            login_url = f"{self.base_url}/account/login"
+            logger.debug(f"Sending login request to {login_url}")
+            response = self.session.post(
+                login_url,
+                headers=headers,
+                json=login_data
+            )
+            
+            # Check response
+            if response.status_code == 200:
+                response_data = response.json()
+                logger.debug(f"Response data: {json.dumps(response_data)}")
+                
+                # COROS API uses "result" field with "0000" for success
+                if response_data.get('result') == "0000" and response_data.get('message') == "OK":
+                    # Extract and store auth token
+                    access_token = response_data.get('data', {}).get('accessToken')
+                    if access_token:
+                        self.token = access_token
+                        logger.info("COROS CN authentication successful")
+                        
+                        # Update session headers with token for subsequent requests
+                        self.session.headers.update({
+                            'Authorization': f"Bearer {self.token}"
+                        })
+                        
+                        # Store the user ID for later use
+                        self.user_id = response_data.get('data', {}).get('userId')
+                        return True
+                    else:
+                        logger.error("Authentication successful but no access token received")
+                else:
+                    # Log more detailed error message
+                    api_code = response_data.get('apiCode')
+                    result_code = response_data.get('result')
+                    error_msg = response_data.get('message', 'Unknown error')
+                    logger.error(f"Authentication failed with result '{result_code}', apiCode '{api_code}': {error_msg}")
+            else:
+                logger.error(f"Authentication failed with status code: {response.status_code}")
+                try:
+                    error_content = response.text
+                    logger.error(f"Error response: {error_content}")
+                except:
+                    pass
+                
+        except Exception as e:
+            logger.error(f"Authentication error: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+        return False 

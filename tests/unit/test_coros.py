@@ -4,6 +4,7 @@ Unit tests for Coros platform implementation.
 
 import os
 import pytest
+import requests
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -24,7 +25,8 @@ class TestCorosPlatform:
         assert platform.email == "test@example.com"
         assert platform.password == "test_password"
         assert platform.cache_dir == temp_cache_dir
-        assert platform.session is None
+        assert isinstance(platform.session, requests.Session)
+        assert platform.token is None
         assert os.path.exists(temp_cache_dir)
 
     def test_authenticate(self, temp_cache_dir):
@@ -126,7 +128,8 @@ class TestCorosCNPlatform:
         assert platform.email == "test@example.com"
         assert platform.password == "test_password"
         assert platform.cache_dir == temp_cache_dir
-        assert platform.base_url == "https://api.coros.com"
+        assert platform.base_url == "https://teamapi.coros.com"
+        assert platform.web_url == "https://t.coros.com"
         
     def test_coros_different_activity_types(self, temp_cache_dir):
         """Test that Coros uses different activity types than Garmin."""
